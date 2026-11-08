@@ -9,3 +9,111 @@ $('speakBtn').onclick=()=>{if(!currentAnswer)return toast('Ask a question first.
 $('copyBtn').onclick=async()=>{try{await navigator.clipboard.writeText(currentQuestion+'\n\n'+currentAnswer);toast('Answer copied.')}catch(e){toast('Copy is not available.')}};$('saveBtn').onclick=()=>{const a=JSON.parse(localStorage.getItem(SAVED)||'[]');a.unshift({question:currentQuestion,answer:currentAnswer,subject,date:new Date().toLocaleString()});localStorage.setItem(SAVED,JSON.stringify(a.slice(0,100)));$('saveBtn').textContent='★';toast('Answer saved in this browser.')};$('shareBtn').onclick=async()=>{const text=currentQuestion+'\n\n'+currentAnswer;if(navigator.share){try{await navigator.share({title:'Assamese Smart Study AI',text})}catch(e){}}else{await navigator.clipboard.writeText(text);toast('Copied. Paste it into WhatsApp or another app.')}};$('pdfBtn').onclick=()=>{const w=window.open('','_blank');if(!w)return toast('Allow pop-ups to print or save PDF.');w.document.write(`<html><head><title>Study answer</title><style>body{font:16px/1.7 Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px}h1{font-size:22px}h2,h3{margin-top:24px}</style></head><body><h1>${escapeHtml(currentQuestion)}</h1>${DOMPurify.sanitize(marked.parse(currentAnswer))}<script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()};$('regenBtn').onclick=()=>ask(currentQuestion);
 function renderHistory(){$('historyList').innerHTML=history.map(h=>`<div class="history-item" data-id="${h.id}"><b>${escapeHtml(h.question.slice(0,90))}</b><small>${escapeHtml(h.subject)} · ${escapeHtml(h.date)}</small></div>`).join('')||'<p class="muted">No questions yet.</p>';document.querySelectorAll('.history-item').forEach(el=>el.onclick=()=>{const h=history.find(x=>x.id==el.dataset.id);if(h){setSubject(h.subject);currentQuestion=h.question;currentAnswer=h.answer;$('answerQuestion').textContent=h.question;$('answerText').innerHTML=DOMPurify.sanitize(marked.parse(h.answer));$('answerArea').classList.remove('hidden');$('welcomeEmpty').classList.add('hidden');$('historyPanel').classList.add('hidden')}})}renderHistory();$('historyBtn').onclick=()=>$('historyPanel').classList.toggle('hidden');$('closeHistory').onclick=()=>$('historyPanel').classList.add('hidden');$('clearHistory').onclick=()=>{if(confirm('Delete all question history from this browser?')){history=[];saveHistory();renderHistory();toast('History deleted.')}};$('settingsBtn').onclick=()=>$('settingsPanel').classList.toggle('hidden');$('closeSettings').onclick=()=>$('settingsPanel').classList.add('hidden');$('language2').onchange=e=>$('language').value=e.target.value;$('language').onchange=e=>$('language2').value=e.target.value;$('themeBtn').onclick=()=>document.body.classList.toggle('light');
 fetch('/api/health').then(r=>r.json()).then(d=>{if(!d.configured)toast('Setup needed: add your Gemini API key on the server.')}).catch(()=>toast('Cannot connect to the AI server.'));
+// ===== CLASS 11 POLITICAL SCIENCE QUESTION BANK =====
+let politicalBank = [];
+
+fetch('./political-science-assamese-class11-2026-27.json')
+  .then(response => {
+    if (!response.ok) throw new Error('Question bank file not found');
+    return response.json();
+  })
+  .then(data => {
+    politicalBank = data.chapters || [];
+    console.log('Political Science question bank loaded:', politicalBank.length);
+    toast('Political Science question bank ready!');
+  })
+  .catch(error => {
+    console.error(error);
+    toast('Could not load the question bank.');
+  });
+
+function findBankAnswer(question) {
+  const clean = text => text.toLowerCase()
+    .normalize('NFC')
+    .replace(/[?!.,।ঃ]/g, '')
+    .trim();
+
+  const query = clean(question);
+  const words = query.split(/\s+/).filter(w => w.length > 1);
+  let best = null;
+  let bestScore = 0;
+
+  politicalBank.forEach(chapter => {
+    const questions = [
+      ...(chapter.short_questions || []),
+      ...(chapter.detailed_questions || [])
+    ];
+
+    questions.forEach(item => {
+      const target = clean(item.question);
+      let score = 0;
+
+      if (query === target) score = 1;
+      else if (target.includes(query) || query.includes(target)) score = 0.9;
+      else {
+        const targetWords = target.split(/\s+/);
+        const matches = words.filter(w => targetWords.some(t => t.includes(w) || w.includes(t)));
+        score = words.length ? matches.length / words.length : 0;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = { item, chapter };
+      }
+    });
+  });
+
+  return bestScore >= 0.35 ? best : null;
+}
+
+window.ask = async function(q, follow = false) {
+  q = (q || $('question').value).trim();
+  if (!q) return toast('Please type a question first.');
+
+  if (!politicalBank.length) {
+    return toast('Question bank is still loading. Try again.');
+  }
+
+  if (!subject.toLowerCase().includes('political')) {
+    return toast('The Political Science question bank is available. More subjects will be added soon.');
+  }
+
+  currentQuestion = q;
+  $('question').value = q;
+  $('welcomeEmpty').classList.add('hidden');
+  $('answerArea').classList.remove('hidden');
+  $('answerQuestion').textContent = q;
+  $('answerText').innerHTML = '<p>Searching your question bank…</p>';
+
+  const result = findBankAnswer(q);
+
+  if (!result) {
+    currentAnswer = 'এই প্ৰশ্নটোৰ উত্তৰ বৰ্তমান প্ৰশ্ন বেংকত উপলব্ধ নহয়। অনুগ্ৰহ কৰি আন শব্দ ব্যৱহাৰ কৰি সুধক অথবা আপোনাৰ শিক্ষকক পৰীক্ষা কৰক।';
+    $('answerNote').textContent = 'Not found in the current question bank.';
+  } else {
+    const chapter = result.chapter;
+    const shortItem = chapter.short_questions.find(x => x.question === result.item.question);
+    const detailedItem = chapter.detailed_questions.find(x => x.question === result.item.question);
+
+    let answer = mode === 'detailed'
+      ? (detailedItem || shortItem).answer
+      : (shortItem || detailedItem).answer;
+
+    currentAnswer = `### ${chapter.chapter_title}\n\n${answer}`;
+    $('answerNote').textContent = 'Class 11 Political Science · Assamese question bank · Verify with your textbook.';
+  }
+
+  $('answerText').innerHTML = DOMPurify.sanitize(marked.parse(currentAnswer));
+
+  history.unshift({
+    id: Date.now(),
+    question: q,
+    answer: currentAnswer,
+    subject,
+    language: language(),
+    date: new Date().toLocaleString()
+  });
+
+  saveHistory();
+  renderHistory();
+};
